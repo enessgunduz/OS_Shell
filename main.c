@@ -12,13 +12,14 @@
 
 #define MAX_LINE 80
 #define MAX_BOOKMARKS 10
+#define MAX_PATH 256
 
 // Function declarations
 void setup(char inputBuffer[], char *args[], int *background);
 void executeCommand(char *args[], int background);
 void searchFiles(char *keyword, int recursive);
 void searchInFile(char *filename, char *keyword);
-void handleInternalCommands(char *args[]);
+int handleInternalCommands(char *args[]);
 void handleIOredirection(char *args[]);
 void handleBookmarkCommand(char *args[]);
 void printBookmarks();
@@ -28,6 +29,9 @@ int numBookmarks = 0;
 pid_t foregroundProcess = 0;
 
 void setup(char inputBuffer[], char *args[], int *background) {
+    printf("myshell: ");
+    fflush(stdout);  // Flush the output buffer
+
     int length, i, start, ct;
     ct = 0;
     length = read(STDIN_FILENO, inputBuffer, MAX_LINE);
@@ -40,7 +44,6 @@ void setup(char inputBuffer[], char *args[], int *background) {
         exit(-1);
     }
 
-    //printf(">>%s<<", inputBuffer);
     for (i = 0; i < length; i++) {
         switch (inputBuffer[i]) {
             case ' ':
@@ -73,6 +76,12 @@ void setup(char inputBuffer[], char *args[], int *background) {
 }
 
 void executeCommand(char *args[], int background) {
+    // Check for internal commands
+    if (strcmp(args[0], "exit") == 0 || strcmp(args[0], "search") == 0 || strcmp(args[0], "bookmark") == 0) {
+        handleInternalCommands(args);
+        return;
+    }
+
     pid_t pid = fork();
     if (pid == 0) {
         // Child process
@@ -94,7 +103,9 @@ void executeCommand(char *args[], int background) {
     }
 }
 
-void handleInternalCommands(char *args[]) {
+
+
+int handleInternalCommands(char *args[]) {
     if (strcmp(args[0], "^Z") == 0) {
         // Stop the currently running foreground process
         if (foregroundProcess != 0) {
@@ -103,14 +114,17 @@ void handleInternalCommands(char *args[]) {
         } else {
             printf("No foreground process to stop.\n");
         }
+        return 1; // Internal command handled
     } else if (strcmp(args[0], "search") == 0) {
         if (args[1] != NULL) {
             searchFiles(args[1], 0);
         } else {
             printf("Usage: search <keyword>\n");
         }
+        return 1; // Internal command handled
     } else if (strcmp(args[0], "bookmark") == 0) {
         handleBookmarkCommand(args);
+        return 1; // Internal command handled
     } else if (strcmp(args[0], "exit") == 0) {
         // Terminate the shell process
         if (foregroundProcess == 0) {
@@ -118,8 +132,11 @@ void handleInternalCommands(char *args[]) {
         } else {
             printf("Cannot exit while there are background processes running.\n");
         }
+        return 1; // Internal command handled
     }
+    return 0; // Not an internal command
 }
+
 
 void handleIOredirection(char *args[]) {
     int i;
@@ -234,14 +251,65 @@ void printBookmarks() {
     }
 }
 
-void searchFiles(char *keyword, int recursive) {
-    // Implementation for searching files
-    // ...
+int isSourceCodeFile(const char *filename) {
+    const char *extensions[] = {".c", ".C", ".h", ".H"};
+    size_t numExtensions = sizeof(extensions) / sizeof(extensions[0]);
+
+    for (size_t i = 0; i < numExtensions; ++i) {
+        if (strstr(filename, extensions[i])) {
+            return 1; // It's a source code file
+        }
+    }
+
+    return 0; // Not a source code file
 }
 
 void searchInFile(char *filename, char *keyword) {
-    // Implementation for searching in a file
-    // ...
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening file");
+        return;
+    }
+
+    char line[MAX_LINE];
+    int lineNumber = 0;
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        lineNumber++;
+        if (strstr(line, keyword) != NULL) {
+            printf("%s:%d: %s", filename, lineNumber, line);
+        }
+    }
+
+    fclose(file);
+}
+
+void searchFiles(char *keyword, int recursive) {
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(".");
+    if (dir == NULL) {
+        perror("Error opening directory");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG && isSourceCodeFile(entry->d_name)) {
+            // Regular file and a source code file
+            searchInFile(entry->d_name, keyword);
+        } else if (recursive && entry->d_type == DT_DIR) { // Directory
+            if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+                char path[MAX_LINE];
+                snprintf(path, sizeof(path), "%s/%s", ".", entry->d_name);
+                chdir(entry->d_name);
+                searchFiles(keyword, recursive);
+                chdir("..");
+            }
+        }
+    }
+
+    closedir(dir);
 }
 
 int main(void) {
@@ -249,18 +317,22 @@ int main(void) {
     int background;
     char *args[MAX_LINE / 2 + 1];
     while (1) {
-        printf("myshell: ");
         background = 0;
         setup(inputBuffer, args, &background);
 
         // Check for internal commands
-        handleInternalCommands(args);
+        if (!handleInternalCommands(args)) {
+            // If it's not an internal command, execute the command
+            // Check for I/O redirection
+            handleIOredirection(args);
 
-        // Check for I/O redirection
-        handleIOredirection(args);
-
-        // Execute the command
-        executeCommand(args, background);
+            // Execute the command
+            executeCommand(args, background);
+        }
     }
     return 0;
+}
+
+void fooooo(){
+
 }
