@@ -251,33 +251,23 @@ void printBookmarks() {
     }
 }
 
-int isSourceCodeFile(const char *filename) {
-    const char *extensions[] = {".c", ".C", ".h", ".H"};
-    size_t numExtensions = sizeof(extensions) / sizeof(extensions[0]);
-
-    for (size_t i = 0; i < numExtensions; ++i) {
-        if (strstr(filename, extensions[i])) {
-            return 1; // It's a source code file
-        }
-    }
-
-    return 0; // Not a source code file
-}
-
 void searchInFile(char *filename, char *keyword) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
-        perror("Error opening file");
+        fprintf(stderr, "Error opening file: %s\n", filename);
         return;
     }
 
-    char line[MAX_LINE];
-    int lineNumber = 0;
+    char line[256];
+    int line_number = 0;
 
     while (fgets(line, sizeof(line), file) != NULL) {
-        lineNumber++;
-        if (strstr(line, keyword) != NULL) {
-            printf("%s:%d: %s", filename, lineNumber, line);
+        line_number++;
+
+        // Search for the word in the line
+        if (strstr(line, word) != NULL) {
+            printf("%s: Found '%s' in %s, line %d\n", word, filename, filename, line_number);
+            break; // Assuming you want to stop searching after the first occurrence
         }
     }
 
@@ -286,30 +276,18 @@ void searchInFile(char *filename, char *keyword) {
 
 void searchFiles(char *keyword, int recursive) {
     DIR *dir;
-    struct dirent *entry;
+    struct dirent *ent;
 
-    dir = opendir(".");
-    if (dir == NULL) {
-        perror("Error opening directory");
-        return;
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG && isSourceCodeFile(entry->d_name)) {
-            // Regular file and a source code file
-            searchInFile(entry->d_name, keyword);
-        } else if (recursive && entry->d_type == DT_DIR) { // Directory
-            if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-                char path[MAX_LINE];
-                snprintf(path, sizeof(path), "%s/%s", ".", entry->d_name);
-                chdir(entry->d_name);
-                searchFiles(keyword, recursive);
-                chdir("..");
+    if ((dir = opendir(".")) != NULL) {
+        while ((ent = readdir(dir)) != NULL) {
+            if (ent->d_type == DT_REG && strstr(ent->d_name, ".c") != NULL) {
+                searchInFile(ent->d_name, word);
             }
         }
+        closedir(dir);
+    } else {
+        perror("Error opening directory");
     }
-
-    closedir(dir);
 }
 
 int main(void) {
