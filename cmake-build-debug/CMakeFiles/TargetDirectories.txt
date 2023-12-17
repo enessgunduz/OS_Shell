@@ -1,0 +1,3 @@
+/Users/enes/CLionProjects/OPshell/cmake-build-debug/CMakeFiles/OPshell.dir
+/Users/enes/CLionProjects/OPshell/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/enes/CLionProjects/OPshell/cmake-build-debug/CMakeFiles/rebuild_cache.dir
