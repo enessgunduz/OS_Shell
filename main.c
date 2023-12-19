@@ -311,10 +311,9 @@ void searchFilesRecursive(char *path, char *keyword) {
 void searchFiles(char *path, char *keyword, int recursive) {
     DIR *dir;
     struct dirent *ent;
-    printf("PATH --> %s\n", path);
     if ((dir = opendir(path)) != NULL) {
         while ((ent = readdir(dir)) != NULL) {
-            if (ent->d_type == DT_REG && strstr(ent->d_name, ".c") != NULL) {
+            if (ent->d_type == DT_REG && ((strstr(ent->d_name, ".c") != NULL) || (strstr(ent->d_name, ".C") != NULL) || (strstr(ent->d_name, ".h") != NULL) || (strstr(ent->d_name, ".H") != NULL)) ) {
                 // Construct the full path for the file
                 char file_path[255];
                 strcpy(file_path, path);
