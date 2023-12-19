@@ -17,7 +17,7 @@
 // Function declarations
 void setup(char inputBuffer[], char *args[], int *background);
 void executeCommand(char *args[], int background);
-void searchFiles(char *keyword, int recursive);
+void searchFiles(char *path, char *keyword, int recursive);
 void searchInFile(char *filename, char *keyword);
 int handleInternalCommands(char *args[]);
 void handleIOredirection(char *args[]);
@@ -106,6 +106,9 @@ void executeCommand(char *args[], int background) {
 
 
 int handleInternalCommands(char *args[]) {
+
+    char *path = ".";
+
     if (strcmp(args[0], "^Z") == 0) {
         // Stop the currently running foreground process
         if (foregroundProcess != 0) {
@@ -117,7 +120,16 @@ int handleInternalCommands(char *args[]) {
         return 1; // Internal command handled
     } else if (strcmp(args[0], "search") == 0) {
         if (args[1] != NULL) {
-            searchFiles(args[1], 0);
+          if (strcmp(args[1], "-r") == 0) {
+            if (args[2] != NULL) {
+              printf("-- yes -r -----> %s\n", args[2]);
+              searchFiles(".", args[2], 1);
+            }
+          }
+          else {
+            printf("-- no -r -----> %s\n", args[1]);
+            searchFiles(".", args[1], 0);      
+          }
         } else {
             printf("Usage: search <keyword>\n");
         }
@@ -265,28 +277,67 @@ void searchInFile(char *filename, char *keyword) {
         line_number++;
 
         // Search for the word in the line
-        if (strstr(line, word) != NULL) {
-            printf("%s: Found '%s' in %s, line %d\n", word, filename, filename, line_number);
-            break; // Assuming you want to stop searching after the first occurrence
+        if (strstr(line, keyword) != NULL) {
+            printf("%d:  '%s' -> %s\n", line_number, filename, line);
         }
     }
 
     fclose(file);
 }
 
-void searchFiles(char *keyword, int recursive) {
+void searchFilesRecursive(char *path, char *keyword) {
     DIR *dir;
     struct dirent *ent;
 
-    if ((dir = opendir(".")) != NULL) {
+    if ((dir = opendir(path)) != NULL) {
         while ((ent = readdir(dir)) != NULL) {
-            if (ent->d_type == DT_REG && strstr(ent->d_name, ".c") != NULL) {
-                searchInFile(ent->d_name, word);
+            if (ent->d_type == DT_DIR) {
+                // Ignore "." and ".." directories
+                if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+                    char new_path[255];
+                    strcpy(new_path, path);
+                    strcat(new_path, "/");
+                    strcat(new_path, ent->d_name);
+                    searchFiles(new_path, keyword, 1);
+                }
             }
         }
         closedir(dir);
     } else {
         perror("Error opening directory");
+    }
+}
+
+void searchFiles(char *path, char *keyword, int recursive) {
+    DIR *dir;
+    struct dirent *ent;
+    printf("PATH --> %s\n", path);
+    if ((dir = opendir(path)) != NULL) {
+        while ((ent = readdir(dir)) != NULL) {
+            if (ent->d_type == DT_REG && strstr(ent->d_name, ".c") != NULL) {
+                // Construct the full path for the file
+                char file_path[255];
+                strcpy(file_path, path);
+                strcat(file_path, "/");
+                strcat(file_path, ent->d_name);
+                searchInFile(file_path, keyword);
+            } else if (recursive && ent->d_type == DT_DIR &&
+                       strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+                // Construct the full path for the subdirectory
+                char sub_dir_path[255];
+                strcpy(sub_dir_path, path);
+                strcat(sub_dir_path, "/");
+                strcat(sub_dir_path, ent->d_name);
+                searchFilesRecursive(sub_dir_path, keyword);
+            }
+        }
+        closedir(dir);
+    } else {
+        perror("Error opening directory");
+    }
+    
+    if (recursive) {
+    	searchFilesRecursive(path, keyword);
     }
 }
 
@@ -313,4 +364,9 @@ int main(void) {
 
 void fooooo(){
 
+}
+
+void efe(){
+	//-r
+	//efe efe
 }
