@@ -87,6 +87,14 @@ void executeCommand(char *args[], int background) {
             args[0][len - 1] = '\0';
         }
 
+	setpgid(0, 0);
+	
+	if (background) {
+            int devNull = open("/dev/null", O_WRONLY);
+            dup2(devNull, STDOUT_FILENO);
+            close(devNull);
+        }
+
         // Use execv to search each directory in the PATH for the command
         char *path = getenv("PATH");
         char *token = strtok(path, ":");
@@ -113,7 +121,9 @@ void executeCommand(char *args[], int background) {
         if (!background) {
             // Wait for the foreground process to complete
             int status;
+            foregroundProcess = pid;
             waitpid(pid, &status, 0);
+            foregroundProcess = 0;
             if (WIFEXITED(status)) {
                 printf("Foreground process exited with status %d\n", WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
