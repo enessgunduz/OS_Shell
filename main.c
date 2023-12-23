@@ -23,15 +23,13 @@ int handleInternalCommands(char *args[]);
 void handleIOredirection(char *args[]);
 void handleBookmarkCommand(char *args[]);
 void printBookmarks();
+char* trimQuotes(const char *str);
 
 char *bookmarks[MAX_BOOKMARKS];
 int numBookmarks = 0;
 pid_t foregroundProcess = 0;
 
 void setup(char inputBuffer[], char *args[], int *background) {
-    printf("myshell: ");
-    fflush(stdout);  // Flush the output buffer
-
     int length, i, start, ct;
     ct = 0;
     length = read(STDIN_FILENO, inputBuffer, MAX_LINE);
@@ -67,35 +65,63 @@ void setup(char inputBuffer[], char *args[], int *background) {
                 if (start == -1)
                     start = i;
                 if (inputBuffer[i] == '&') {
+                    // Remove the ampersand from the command name if it exists
+                    if (i > 0) {
+                        inputBuffer[i - 1] = '\0';
+                    }
                     *background = 1;
-                    inputBuffer[i - 1] = '\0';
                 }
         }
     }
     args[ct] = NULL;
 }
 
-void executeCommand(char *args[], int background) {
-    // Check for internal commands
-    if (strcmp(args[0], "exit") == 0 || strcmp(args[0], "search") == 0 || strcmp(args[0], "bookmark") == 0) {
-        handleInternalCommands(args);
-        return;
-    }
 
+void executeCommand(char *args[], int background) {
     pid_t pid = fork();
     if (pid == 0) {
         // Child process
-        execvp(args[0], args);
-        // execvp failed
-        perror("execvp");
+        // Remove the ampersand from the command name if it exists
+        size_t len = strlen(args[0]);
+        if (len > 0 && args[0][len - 1] == '&') {
+            args[0][len - 1] = '\0';
+        }
+
+        // Use execv to search each directory in the PATH for the command
+        char *path = getenv("PATH");
+        char *token = strtok(path, ":");
+
+        while (token != NULL) {
+            char commandPath[MAX_PATH];
+            snprintf(commandPath, sizeof(commandPath), "%s/%s", token, args[0]);
+
+            // Check if the file exists at the specified path
+            struct stat st;
+            if (stat(commandPath, &st) == 0) {
+                printf("Executing: %s\n", commandPath);  // Print the command being executed
+                execv(commandPath, args);
+            }
+
+            token = strtok(NULL, ":");
+        }
+
+        // If the loop completes, the command was not found
+        fprintf(stderr, "Command not found: %s\n", args[0]);
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
         // Parent process
         if (!background) {
             // Wait for the foreground process to complete
-            foregroundProcess = pid;
-            waitpid(pid, NULL, 0);
-            foregroundProcess = 0;
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status)) {
+                printf("Foreground process exited with status %d\n", WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf("Foreground process terminated by signal %d\n", WTERMSIG(status));
+            }
+        } else {
+            // In background mode, do not wait for the process to complete
+            printf("Background process started: %d\n", pid);
         }
     } else {
         perror("fork");
@@ -120,16 +146,14 @@ int handleInternalCommands(char *args[]) {
         return 1; // Internal command handled
     } else if (strcmp(args[0], "search") == 0) {
         if (args[1] != NULL) {
-          if (strcmp(args[1], "-r") == 0) {
-            if (args[2] != NULL) {
-              printf("-- yes -r -----> %s\n", args[2]);
-              searchFiles(".", args[2], 1);
+            if (strcmp(args[1], "-r") == 0) {
+                if (args[2] != NULL) {
+                    searchFiles(".", trimQuotes(args[2]), 1);
+                }
             }
-          }
-          else {
-            printf("-- no -r -----> %s\n", args[1]);
-            searchFiles(".", args[1], 0);      
-          }
+            else {
+                searchFiles(".", trimQuotes(args[1]), 0);
+            }
         } else {
             printf("Usage: search <keyword>\n");
         }
@@ -154,8 +178,10 @@ void handleIOredirection(char *args[]) {
     int i;
     int inputRedirect = 0;
     int outputRedirect = 0;
+    int errorRedirect = 0;
     char *inputFile = NULL;
     char *outputFile = NULL;
+    char *errorFile = NULL;
 
     for (i = 0; args[i] != NULL; i++) {
         if (strcmp(args[i], "<") == 0) {
@@ -168,11 +194,16 @@ void handleIOredirection(char *args[]) {
             outputRedirect = 1;
             args[i] = NULL;
             outputFile = args[i + 1];
-        } else if (strcmp(args[i], "2>") == 0) {
-            // Error redirection
+        } else if (strcmp(args[i], ">>") == 0) {
+            // Append output redirection
             outputRedirect = 1;
             args[i] = NULL;
             outputFile = args[i + 1];
+        } else if (strcmp(args[i], "2>") == 0) {
+            // Error redirection
+            errorRedirect = 1;
+            args[i] = NULL;
+            errorFile = args[i + 1];
         }
     }
 
@@ -187,7 +218,7 @@ void handleIOredirection(char *args[]) {
     }
 
     if (outputRedirect) {
-        int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int fd = open(outputFile, O_WRONLY | O_CREAT | (outputRedirect ? O_APPEND : O_TRUNC), 0644);
         if (fd == -1) {
             perror("open");
             exit(EXIT_FAILURE);
@@ -195,7 +226,18 @@ void handleIOredirection(char *args[]) {
         dup2(fd, STDOUT_FILENO);
         close(fd);
     }
+
+    if (errorRedirect) {
+        int fd = open(errorFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) {
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+    }
 }
+
 
 void handleBookmarkCommand(char *args[]) {
     if (args[1] != NULL) {
@@ -205,7 +247,6 @@ void handleBookmarkCommand(char *args[]) {
             if (args[2] != NULL) {
                 int index = atoi(args[2]);
                 if (index >= 0 && index < numBookmarks) {
-                    printf("Executing bookmark %d: %s\n", index, bookmarks[index]);
                     char *bookmarkArgs[MAX_LINE / 2 + 1];
                     int i;
                     for (i = 0; i <= MAX_LINE / 2; i++) {
@@ -229,7 +270,6 @@ void handleBookmarkCommand(char *args[]) {
             if (args[2] != NULL) {
                 int index = atoi(args[2]);
                 if (index >= 0 && index < numBookmarks) {
-                    printf("Deleting bookmark %d: %s\n", index, bookmarks[index]);
                     free(bookmarks[index]);
                     // Shift the remaining bookmarks up
                     for (int i = index; i < numBookmarks - 1; i++) {
@@ -245,8 +285,7 @@ void handleBookmarkCommand(char *args[]) {
         } else {
             // Add a new bookmark
             if (numBookmarks < MAX_BOOKMARKS) {
-                bookmarks[numBookmarks] = strdup(args[1]);
-                printf("Bookmark added: %s\n", bookmarks[numBookmarks]);
+                bookmarks[numBookmarks] = strdup(trimQuotes(args[1]));
                 numBookmarks++;
             } else {
                 printf("Bookmark limit reached.\n");
@@ -334,9 +373,9 @@ void searchFiles(char *path, char *keyword, int recursive) {
     } else {
         perror("Error opening directory");
     }
-    
+
     if (recursive) {
-    	searchFilesRecursive(path, keyword);
+        searchFilesRecursive(path, keyword);
     }
 }
 
@@ -345,6 +384,9 @@ int main(void) {
     int background;
     char *args[MAX_LINE / 2 + 1];
     while (1) {
+        printf("myshell: ");
+        fflush(stdout);  // Flush the output buffer
+
         background = 0;
         setup(inputBuffer, args, &background);
 
@@ -356,9 +398,36 @@ int main(void) {
 
             // Execute the command
             executeCommand(args, background);
+
         }
     }
     return 0;
+}
+
+char* trimQuotes(const char *str) {
+    size_t len = strlen(str);
+
+    // Check if the string has at least two characters and starts with a quote
+    if (len >= 2 && str[0] == '"' && str[len - 1] == '"') {
+        // Allocate memory for the trimmed string
+        char *trimmed = (char*)malloc(len - 1);
+        if (trimmed == NULL) {
+            // Handle memory allocation failure
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Copy characters to the new memory location, excluding the first and last quotes
+        strncpy(trimmed, str + 1, len - 2);
+
+        // Null-terminate the trimmed string
+        trimmed[len - 2] = '\0';
+
+        return trimmed;
+    } else {
+        // If no trimming is needed, return a duplicate of the original string
+        return strdup(str);
+    }
 }
 
 void fooooo(){
@@ -366,6 +435,6 @@ void fooooo(){
 }
 
 void efe(){
-	//-r
-	//efe efe
+    //-r
+    //efe efe
 }
